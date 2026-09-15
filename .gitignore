@@ -1,0 +1,30 @@
+# Dependências e arquivos gerados
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Aplicativos nativos gerados
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+/ios/
+/android/
+
+# Arquivos locais
+.metro-health-check*
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.pem
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+work/

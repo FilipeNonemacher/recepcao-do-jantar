@@ -1,0 +1,20 @@
+{
+  "name": "Recepção do Jantar",
+  "short_name": "Jantar",
+  "description": "Cadastro e consulta de convidados do jantar.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FAF8F3",
+  "theme_color": "#245744",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "./icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
