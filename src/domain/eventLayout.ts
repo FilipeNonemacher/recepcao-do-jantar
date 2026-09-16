@@ -11,11 +11,13 @@ export type MapElement = {
   height: number;
   color: string;
   shape: MapElementShape;
+  capacity: number;
 };
 
 export type EventLayout = {
   elements: MapElement[];
   updatedAt: string;
+  locked: boolean;
 };
 
 const table = (label: string, x: number, y: number, color = '#FFFFFF'): MapElement => ({
@@ -28,6 +30,7 @@ const table = (label: string, x: number, y: number, color = '#FFFFFF'): MapEleme
   height: 6.2,
   color,
   shape: 'circle',
+  capacity: 8,
 });
 
 const structure = (id: string, label: string, x: number, y: number, width: number, height: number, color = '#F4F1E8'): MapElement => ({
@@ -40,6 +43,7 @@ const structure = (id: string, label: string, x: number, y: number, width: numbe
   height,
   color,
   shape: 'rectangle',
+  capacity: 0,
 });
 
 export function createDefaultLayout(): EventLayout {
@@ -48,6 +52,7 @@ export function createDefaultLayout(): EventLayout {
   const red = '#F51D2A';
   return {
     updatedAt: new Date().toISOString(),
+    locked: false,
     elements: [
       structure('stage', 'PALCO', 29, 7, 42, 8),
       structure('screen', 'TELÃO', 75, 8, 20, 7),
@@ -86,6 +91,7 @@ export function clampMapElement(element: MapElement): MapElement {
     height,
     x: Math.max(0, Math.min(100 - width, element.x)),
     y: Math.max(0, Math.min(100 - height, element.y)),
+    capacity: element.kind === 'table' ? Math.max(1, Math.min(30, Math.round(element.capacity || 8))) : 0,
   };
 }
 
@@ -94,7 +100,11 @@ export function createMapElement(kind: MapElementKind, existing: MapElement[]): 
   if (kind === 'table') {
     const numbers = existing.filter((item) => item.kind === 'table').map((item) => Number(item.label)).filter(Number.isFinite);
     const nextNumber = numbers.length ? Math.max(...numbers) + 1 : 1;
-    return { id, kind, label: String(nextNumber), x: 45, y: 45, width: 8.5, height: 6.2, color: '#FFFFFF', shape: 'circle' };
+    return { id, kind, label: String(nextNumber), x: 45, y: 45, width: 8.5, height: 6.2, color: '#FFFFFF', shape: 'circle', capacity: 8 };
   }
-  return { id, kind, label: 'NOVO ITEM', x: 40, y: 30, width: 20, height: 7, color: '#F4F1E8', shape: 'rectangle' };
+  return { id, kind, label: 'NOVO ITEM', x: 40, y: 30, width: 20, height: 7, color: '#F4F1E8', shape: 'rectangle', capacity: 0 };
+}
+
+export function normalizeLayout(layout: EventLayout): EventLayout {
+  return { ...layout, locked: layout.locked === true, elements: layout.elements.map((element) => clampMapElement({ ...element, capacity: element.kind === 'table' ? element.capacity || 8 : 0 })) };
 }

@@ -7,6 +7,7 @@ type GuestRow = {
   guest_role?: string;
   companions: number;
   table_name: string;
+  checked_in?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -23,6 +24,7 @@ function fromRow(row: GuestRow): Guest {
     role: row.guest_role?.trim() || 'Convidado',
     companions: row.companions,
     table: row.table_name,
+    checkedIn: row.checked_in === true,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -35,6 +37,7 @@ function toRow(guest: Guest): GuestRow {
     guest_role: guest.role,
     companions: guest.companions,
     table_name: guest.table,
+    checked_in: guest.checkedIn,
     created_at: guest.createdAt,
     updated_at: guest.updatedAt,
   };

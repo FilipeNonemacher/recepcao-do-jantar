@@ -4,6 +4,7 @@ export type Guest = {
   role: string;
   companions: number;
   table: string;
+  checkedIn: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -57,5 +58,5 @@ export function groupSize(guest: Pick<Guest, 'companions'>): number {
 
 export function createGuest(draft: GuestDraft): Guest {
   const now = new Date().toISOString();
-  return { ...cleanGuestDraft(draft), id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, createdAt: now, updatedAt: now };
+  return { ...cleanGuestDraft(draft), checkedIn: false, id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, createdAt: now, updatedAt: now };
 }

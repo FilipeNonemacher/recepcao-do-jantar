@@ -1,6 +1,6 @@
 # Recepção do Jantar
 
-Aplicativo Expo/React Native para cadastrar e localizar convidados de um evento, incluindo função, mesa e acompanhantes. Possui uma planta interativa do salão, com mesas e estruturas editáveis e destaque automático da mesa pesquisada.
+Aplicativo Expo/React Native para cadastrar, localizar e fazer o check-in de convidados de um evento, incluindo função, mesa e acompanhantes. Possui uma planta interativa e sincronizada em tempo real, com mesas, capacidade e estruturas editáveis, destaque automático da mesa pesquisada, visualização de lugares ocupados ou disponíveis e opção de selar o mapa oficial do evento.
 
 ## Testar durante o desenvolvimento
 

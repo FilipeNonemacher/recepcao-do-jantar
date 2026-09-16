@@ -8,7 +8,7 @@ function parseGuest(value: unknown): Guest | null {
   const guest = value as Partial<Guest>;
   const isValid = typeof guest.id === 'string' && typeof guest.name === 'string' && Number.isInteger(guest.companions) && (guest.companions ?? -1) >= 0 && typeof guest.table === 'string' && typeof guest.createdAt === 'string' && typeof guest.updatedAt === 'string';
   if (!isValid) return null;
-  return { ...guest, role: typeof guest.role === 'string' && guest.role.trim() ? guest.role : 'Convidado' } as Guest;
+  return { ...guest, role: typeof guest.role === 'string' && guest.role.trim() ? guest.role : 'Convidado', checkedIn: guest.checkedIn === true } as Guest;
 }
 
 export interface GuestRepository {

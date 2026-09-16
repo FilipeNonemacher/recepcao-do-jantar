@@ -1,7 +1,7 @@
-import { EventLayout, MapElement } from '../domain/eventLayout';
+import { EventLayout, MapElement, normalizeLayout } from '../domain/eventLayout';
 import { supabase } from './supabase';
 
-type LayoutRow = { id: string; elements: MapElement[]; updated_at: string };
+type LayoutRow = { id: string; elements: MapElement[]; updated_at: string; is_locked?: boolean };
 
 function requireClient() {
   if (!supabase) throw new Error('A sincronização ainda não foi configurada.');
@@ -13,11 +13,11 @@ export async function loadSyncedLayout(): Promise<EventLayout | null> {
   if (error) throw new Error(error.message);
   if (!data) return null;
   const row = data as LayoutRow;
-  return { elements: row.elements, updatedAt: row.updated_at };
+  return normalizeLayout({ elements: row.elements, updatedAt: row.updated_at, locked: row.is_locked === true });
 }
 
 export async function saveSyncedLayout(layout: EventLayout): Promise<void> {
-  const { error } = await requireClient().from('event_layouts').upsert({ id: 'main', elements: layout.elements, updated_at: layout.updatedAt });
+  const { error } = await requireClient().from('event_layouts').upsert({ id: 'main', elements: layout.elements, updated_at: layout.updatedAt, is_locked: layout.locked });
   if (error) throw new Error(error.message);
 }
 

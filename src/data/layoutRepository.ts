@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createDefaultLayout, EventLayout, MapElement } from '../domain/eventLayout';
+import { createDefaultLayout, EventLayout, MapElement, normalizeLayout } from '../domain/eventLayout';
 
 const STORAGE_KEY = '@recepcao-jantar/layout/v1';
 
@@ -15,7 +15,7 @@ export const localLayoutRepository = {
     if (!raw) return createDefaultLayout();
     const parsed = JSON.parse(raw) as Partial<EventLayout>;
     if (!Array.isArray(parsed.elements) || !parsed.elements.every(isElement)) return createDefaultLayout();
-    return { elements: parsed.elements, updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString() };
+    return normalizeLayout({ elements: parsed.elements, updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(), locked: parsed.locked === true });
   },
   async save(layout: EventLayout): Promise<void> {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(layout));

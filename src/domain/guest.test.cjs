@@ -40,3 +40,7 @@ test('cadastro exige nome, função, mesa e quantidade válida', () => {
 test('total do grupo inclui o convidado principal', () => {
   assert.equal(groupSize(guest('Ana', 3)), 4);
 });
+
+test('um novo convidado começa sem check-in', () => {
+  assert.equal(guest('Carlos').checkedIn, false);
+});
