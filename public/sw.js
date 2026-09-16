@@ -1,4 +1,4 @@
-const CACHE_NAME = 'recepcao-jantar-v1';
+const CACHE_NAME = 'recepcao-jantar-v2';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.add('./')));
