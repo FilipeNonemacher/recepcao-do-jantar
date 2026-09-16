@@ -5,21 +5,27 @@ import {
   ActivityIndicator, Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal,
   Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View,
 } from 'react-native';
+import { LayoutEditorScreen, MapViewerModal } from './src/components/EventMap';
 import { localGuestRepository } from './src/data/guestRepository';
+import { localLayoutRepository } from './src/data/layoutRepository';
+import { loadSyncedLayout, saveSyncedLayout, subscribeToLayout } from './src/data/syncedLayoutRepository';
 import { deleteSyncedGuest, loadSyncedGuests, saveSyncedGuest, subscribeToGuests } from './src/data/syncedGuestRepository';
 import { isSyncConfigured, supabase } from './src/data/supabase';
+import { createDefaultLayout, EventLayout } from './src/domain/eventLayout';
 import {
   cleanGuestDraft, createGuest, findPossibleDuplicates, Guest, GuestDraft,
   GuestValidationErrors, groupSize, searchGuests, validateGuestDraft,
 } from './src/domain/guest';
 
-type Screen = 'search' | 'guests';
+type Screen = 'search' | 'guests' | 'map';
 type SyncState = 'local' | 'syncing' | 'online' | 'offline';
 const C = { ink: '#17211B', muted: '#647067', line: '#DEE4DF', paper: '#FAF8F3', card: '#FFFFFF', green: '#245744', greenDark: '#183C30', greenSoft: '#E5EFE9', gold: '#C29148', goldSoft: '#F7EEDC', danger: '#A33D3D', dangerSoft: '#FCEAEA' };
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('search');
   const [guests, setGuests] = useState<Guest[]>([]);
+  const [layout, setLayout] = useState<EventLayout>(() => createDefaultLayout());
+  const [mapGuest, setMapGuest] = useState<Guest>();
   const [query, setQuery] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -51,6 +57,23 @@ export default function App() {
     setLoading(false);
   };
 
+  const loadLayout = async () => {
+    const cachedLayout = await localLayoutRepository.load();
+    setLayout(cachedLayout);
+    if (!isSyncConfigured || !session) return;
+    try {
+      const syncedLayout = await loadSyncedLayout();
+      if (syncedLayout) {
+        setLayout(syncedLayout);
+        await localLayoutRepository.save(syncedLayout);
+      } else {
+        await saveSyncedLayout(cachedLayout);
+      }
+    } catch {
+      // O mapa local continua disponível quando o banco ainda não foi atualizado.
+    }
+  };
+
   useEffect(() => {
     if (!isSyncConfigured || !supabase) return;
     const client = supabase;
@@ -61,7 +84,7 @@ export default function App() {
 
   useEffect(() => {
     if (!authReady || (isSyncConfigured && !session)) { setLoading(false); return; }
-    void loadGuests();
+    void Promise.all([loadGuests(), loadLayout()]);
   }, [authReady, session?.user.id]);
 
   useEffect(() => {
@@ -79,8 +102,27 @@ export default function App() {
     });
   }, [session?.user.id]);
 
+  useEffect(() => {
+    if (!isSyncConfigured || !session) return;
+    const refresh = () => { void loadSyncedLayout().then(async (nextLayout) => {
+      if (!nextLayout) return;
+      setLayout(nextLayout);
+      await localLayoutRepository.save(nextLayout);
+    }); };
+    return subscribeToLayout(refresh);
+  }, [session?.user.id]);
+
   const results = useMemo(() => hasSearched ? searchGuests(guests, query) : [], [guests, hasSearched, query]);
   const persistLocal = async (next: Guest[]) => { await localGuestRepository.save(next); setGuests(next); };
+  const saveLayout = async (nextLayout: EventLayout) => {
+    if (isSyncConfigured) {
+      setSyncState('syncing');
+      try { await saveSyncedLayout(nextLayout); setSyncState('online'); }
+      catch (error) { setSyncState('offline'); throw error; }
+    }
+    await localLayoutRepository.save(nextLayout);
+    setLayout(nextLayout);
+  };
   const saveGuest = async (draft: GuestDraft, guest?: Guest) => {
     const cleaned = cleanGuestDraft(draft);
     const nextGuest = guest ? { ...guest, ...cleaned, updatedAt: new Date().toISOString() } : createGuest(cleaned);
@@ -115,13 +157,16 @@ export default function App() {
         <Header guests={guests.length} people={totalPeople} />
         <SyncBar state={syncState} onSignOut={session ? () => void supabase?.auth.signOut({ scope: 'local' }) : undefined} />
         {screen === 'search' ? (
-          <SearchScreen query={query} setQuery={(v) => { setQuery(v); if (!v.trim()) setHasSearched(false); }} searched={hasSearched} results={results} onSearch={() => { Keyboard.dismiss(); setHasSearched(true); }} onClear={() => { setQuery(''); setHasSearched(false); }} onEdit={setEditorGuest} onAdd={() => setEditorGuest(null)} />
-        ) : (
+          <SearchScreen query={query} setQuery={(v) => { setQuery(v); if (!v.trim()) setHasSearched(false); }} searched={hasSearched} results={results} onSearch={() => { Keyboard.dismiss(); setHasSearched(true); }} onClear={() => { setQuery(''); setHasSearched(false); }} onEdit={setEditorGuest} onOpenMap={setMapGuest} onAdd={() => setEditorGuest(null)} />
+        ) : screen === 'guests' ? (
           <GuestsScreen guests={searchGuests(guests, '')} onAdd={() => setEditorGuest(null)} onEdit={setEditorGuest} onDelete={removeGuest} />
+        ) : (
+          <LayoutEditorScreen layout={layout} onSave={saveLayout} />
         )}
         <Navigation screen={screen} onChange={setScreen} />
       </View>
       <GuestEditor visible={editorGuest !== undefined} guest={editorGuest ?? undefined} guests={guests} onClose={() => setEditorGuest(undefined)} onSave={saveGuest} />
+      <MapViewerModal guest={mapGuest} layout={layout} onClose={() => setMapGuest(undefined)} />
     </SafeAreaView>
   );
 }
@@ -157,41 +202,41 @@ function LoginScreen() {
   return <SafeAreaView style={s.loginPage}><StatusBar style="light" /><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.loginPage}><ScrollView contentContainerStyle={s.loginContent} keyboardShouldPersistTaps="handled"><View style={s.loginMark}><Text style={s.loginMarkText}>J</Text></View><Text style={s.loginEyebrow}>RECEPÇÃO DO JANTAR</Text><Text style={s.loginTitle}>Acesso da equipe</Text><Text style={s.loginSubtitle}>Entre para acessar a lista sincronizada de convidados.</Text><View style={s.loginCard}><Field autoCapitalize="none" autoComplete="email" keyboardType="email-address" label="E-mail" onChangeText={setEmail} placeholder="equipe@evento.com" value={email} /><Field autoCapitalize="none" autoComplete="password" label="Senha" onChangeText={setPassword} onSubmitEditing={() => void signIn()} placeholder="Sua senha" secureTextEntry value={password} />{!!error && <Text style={s.loginError}>{error}</Text>}<Button label={busy ? 'Entrando…' : 'Entrar'} onPress={() => void signIn()} disabled={busy || !email.trim() || !password} /></View><Text style={s.loginHelp}>O acesso é fornecido pelo responsável do evento.</Text></ScrollView></KeyboardAvoidingView></SafeAreaView>;
 }
 
-type SearchProps = { query: string; setQuery: (v: string) => void; searched: boolean; results: Guest[]; onSearch: () => void; onClear: () => void; onEdit: (g: Guest) => void; onAdd: () => void };
-function SearchScreen({ query, setQuery, searched, results, onSearch, onClear, onEdit, onAdd }: SearchProps) {
+type SearchProps = { query: string; setQuery: (v: string) => void; searched: boolean; results: Guest[]; onSearch: () => void; onClear: () => void; onEdit: (g: Guest) => void; onOpenMap: (g: Guest) => void; onAdd: () => void };
+function SearchScreen({ query, setQuery, searched, results, onSearch, onClear, onEdit, onOpenMap, onAdd }: SearchProps) {
   return <View style={s.screen}><FlatList data={results} keyExtractor={(item) => item.id} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled"
-    ListHeaderComponent={<><Text style={s.title}>Encontre um convidado</Text><Text style={s.subtitle}>Digite o nome para consultar a mesa e o grupo.</Text><View style={s.searchRow}><View style={s.searchBox}><Text style={s.searchGlyph}>⌕</Text><TextInput accessibilityLabel="Nome do convidado" autoCapitalize="words" autoCorrect={false} onChangeText={setQuery} onSubmitEditing={onSearch} placeholder="Nome do convidado" placeholderTextColor="#899188" returnKeyType="search" style={s.searchInput} value={query} />{!!query && <Pressable accessibilityLabel="Limpar busca" onPress={onClear} style={s.clear}><Text style={s.clearText}>×</Text></Pressable>}</View><Button label="Buscar" onPress={onSearch} compact disabled={!query.trim()} /></View>{searched && <Text style={s.resultCount}>{results.length === 1 ? '1 resultado encontrado' : `${results.length} resultados encontrados`}</Text>}</>}
-    renderItem={({ item }) => <ResultCard guest={item} onEdit={() => onEdit(item)} />}
-    ListEmptyComponent={searched ? <Empty title="Nenhum convidado encontrado" text="Confira o nome ou cadastre esta pessoa na lista." action="Cadastrar convidado" onPress={onAdd} /> : <View style={s.welcome}><Text style={s.welcomeKicker}>CONSULTA RÁPIDA</Text><Text style={s.welcomeTitle}>A mesa certa, sem demora.</Text><Text style={s.welcomeText}>A busca encontra partes do nome e ignora diferenças de acentos e letras maiúsculas.</Text></View>}
+    ListHeaderComponent={<><Text style={s.title}>Encontre um convidado</Text><Text style={s.subtitle}>Digite o nome ou a função para consultar a mesa e o grupo.</Text><View style={s.searchRow}><View style={s.searchBox}><Text style={s.searchGlyph}>⌕</Text><TextInput accessibilityLabel="Nome ou função do convidado" autoCapitalize="words" autoCorrect={false} onChangeText={setQuery} onSubmitEditing={onSearch} placeholder="Nome ou função" placeholderTextColor="#899188" returnKeyType="search" style={s.searchInput} value={query} />{!!query && <Pressable accessibilityLabel="Limpar busca" onPress={onClear} style={s.clear}><Text style={s.clearText}>×</Text></Pressable>}</View><Button label="Buscar" onPress={onSearch} compact disabled={!query.trim()} /></View>{searched && <Text style={s.resultCount}>{results.length === 1 ? '1 resultado encontrado' : `${results.length} resultados encontrados`}</Text>}</>}
+    renderItem={({ item }) => <ResultCard guest={item} onEdit={() => onEdit(item)} onOpenMap={() => onOpenMap(item)} />}
+    ListEmptyComponent={searched ? <Empty title="Nenhum convidado encontrado" text="Confira o nome ou a função, ou cadastre esta pessoa na lista." action="Cadastrar convidado" onPress={onAdd} /> : <View style={s.welcome}><Text style={s.welcomeKicker}>CONSULTA RÁPIDA</Text><Text style={s.welcomeTitle}>A mesa certa, sem demora.</Text><Text style={s.welcomeText}>A busca encontra partes do nome ou da função e ignora diferenças de acentos e letras maiúsculas.</Text></View>}
   /></View>;
 }
 
-function ResultCard({ guest, onEdit }: { guest: Guest; onEdit: () => void }) {
+function ResultCard({ guest, onEdit, onOpenMap }: { guest: Guest; onEdit: () => void; onOpenMap: () => void }) {
   const people = groupSize(guest);
-  return <View style={s.resultCard}><View style={s.resultTop}><View style={s.nameBlock}><Text style={s.resultName}>{guest.name}</Text><Text style={s.groupSummary}>{guest.companions === 0 ? 'Sem acompanhantes' : `${guest.companions} ${guest.companions === 1 ? 'acompanhante' : 'acompanhantes'}`} · {people} {people === 1 ? 'pessoa' : 'pessoas'} no grupo</Text></View><Pressable onPress={onEdit} style={s.smallAction}><Text style={s.smallActionText}>Editar</Text></Pressable></View><View style={s.tablePanel}><View><Text style={s.tableLabel}>MESA</Text><Text style={s.tableNumber}>{guest.table}</Text></View><View style={s.mapPlaceholder}><Text style={s.mapTitle}>Localização da mesa</Text><Text style={s.mapText}>Mapa será adicionado em breve</Text></View></View></View>;
+  return <View style={s.resultCard}><View style={s.resultTop}><Pressable accessibilityRole="button" onPress={onOpenMap} style={s.nameBlock}><Text style={s.resultName}>{guest.name}</Text><Text style={s.roleText}>{guest.role}</Text><Text style={s.groupSummary}>{guest.companions === 0 ? 'Sem acompanhantes' : `${guest.companions} ${guest.companions === 1 ? 'acompanhante' : 'acompanhantes'}`} · {people} {people === 1 ? 'pessoa' : 'pessoas'} no grupo</Text><Text style={s.nameHint}>Toque para localizar no mapa</Text></Pressable><Pressable onPress={onEdit} style={s.smallAction}><Text style={s.smallActionText}>Editar</Text></Pressable></View><Pressable onPress={onOpenMap} style={s.tablePanel}><View><Text style={s.tableLabel}>MESA</Text><Text style={s.tableNumber}>{guest.table}</Text></View><View style={s.mapPlaceholder}><Text style={s.mapTitle}>Ver no mapa</Text><Text style={s.mapText}>Toque para destacar a localização</Text></View></Pressable></View>;
 }
 
 function GuestsScreen({ guests, onAdd, onEdit, onDelete }: { guests: Guest[]; onAdd: () => void; onEdit: (g: Guest) => void; onDelete: (g: Guest) => void }) {
   return <View style={s.screen}><FlatList data={guests} keyExtractor={(item) => item.id} contentContainerStyle={s.guestContent}
     ListHeaderComponent={<View style={s.listHeading}><View style={s.listHeadingText}><Text style={s.title}>Convidados</Text><Text style={s.subtitle}>Cadastre e organize a lista do jantar.</Text></View><Button label="+ Novo" onPress={onAdd} compact /></View>}
-    renderItem={({ item }) => <View style={s.listCard}><View style={s.avatar}><Text style={s.avatarText}>{item.name.charAt(0).toUpperCase()}</Text></View><View style={s.listBody}><Text style={s.listName}>{item.name}</Text><Text style={s.listMeta}>Mesa {item.table} · {item.companions} {item.companions === 1 ? 'acompanhante' : 'acompanhantes'}</Text></View><Pressable accessibilityLabel={`Editar ${item.name}`} onPress={() => onEdit(item)} style={s.iconButton}><Text style={s.iconText}>✎</Text></Pressable><Pressable accessibilityLabel={`Excluir ${item.name}`} onPress={() => onDelete(item)} style={[s.iconButton, s.deleteButton]}><Text style={s.deleteText}>×</Text></Pressable></View>}
+    renderItem={({ item }) => <View style={s.listCard}><View style={s.avatar}><Text style={s.avatarText}>{item.name.charAt(0).toUpperCase()}</Text></View><View style={s.listBody}><Text style={s.listName}>{item.name}</Text><Text style={s.listRole}>{item.role}</Text><Text style={s.listMeta}>Mesa {item.table} · {item.companions} {item.companions === 1 ? 'acompanhante' : 'acompanhantes'}</Text></View><Pressable accessibilityLabel={`Editar ${item.name}`} onPress={() => onEdit(item)} style={s.iconButton}><Text style={s.iconText}>✎</Text></Pressable><Pressable accessibilityLabel={`Excluir ${item.name}`} onPress={() => onDelete(item)} style={[s.iconButton, s.deleteButton]}><Text style={s.deleteText}>×</Text></Pressable></View>}
     ListEmptyComponent={<Empty title="Sua lista está vazia" text="Cadastre o primeiro convidado para começar." action="Cadastrar convidado" onPress={onAdd} />}
   /></View>;
 }
 
 function GuestEditor({ visible, guest, guests, onClose, onSave }: { visible: boolean; guest?: Guest; guests: Guest[]; onClose: () => void; onSave: (d: GuestDraft, g?: Guest) => Promise<void> }) {
-  const [name, setName] = useState(''); const [companionsText, setCompanionsText] = useState('0'); const [table, setTable] = useState(''); const [errors, setErrors] = useState<GuestValidationErrors>({}); const [saving, setSaving] = useState(false);
-  useEffect(() => { if (visible) { setName(guest?.name ?? ''); setCompanionsText(String(guest?.companions ?? 0)); setTable(guest?.table ?? ''); setErrors({}); setSaving(false); } }, [visible, guest]);
+  const [name, setName] = useState(''); const [role, setRole] = useState(''); const [companionsText, setCompanionsText] = useState('0'); const [table, setTable] = useState(''); const [errors, setErrors] = useState<GuestValidationErrors>({}); const [saving, setSaving] = useState(false);
+  useEffect(() => { if (visible) { setName(guest?.name ?? ''); setRole(guest?.role ?? ''); setCompanionsText(String(guest?.companions ?? 0)); setTable(guest?.table ?? ''); setErrors({}); setSaving(false); } }, [visible, guest]);
   const companions = companionsText === '' ? Number.NaN : Number(companionsText);
   const duplicates = findPossibleDuplicates(guests, name, guest?.id);
-  const submit = async () => { const draft = { name, companions, table }; const nextErrors = validateGuestDraft(draft); setErrors(nextErrors); if (Object.keys(nextErrors).length) return; setSaving(true); try { await onSave(draft, guest); } catch { Alert.alert('Não foi possível salvar', 'Confira o aparelho e tente novamente.'); setSaving(false); } };
-  return <Modal animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet" visible={visible}><SafeAreaView style={s.modalPage}><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalPage}><View style={s.modalHeader}><Pressable onPress={onClose} style={s.cancel}><Text style={s.cancelText}>Cancelar</Text></Pressable><Text style={s.modalTitle}>{guest ? 'Editar convidado' : 'Novo convidado'}</Text><View style={s.headerSpacer} /></View><ScrollView contentContainerStyle={s.form} keyboardShouldPersistTaps="handled"><Field autoCapitalize="words" autoFocus error={errors.name} label="Nome do convidado" onChangeText={setName} placeholder="Ex.: Maria Aparecida Silva" value={name} />{!!duplicates.length && <View style={s.warning}><Text style={s.warningTitle}>Já existe alguém com este nome</Text><Text style={s.warningText}>{duplicates.map((item) => `${item.name} — mesa ${item.table}`).join('\n')}</Text></View>}<View style={s.formRow}><View style={s.formHalf}><Field error={errors.companions} keyboardType="number-pad" label="Acompanhantes" maxLength={2} onChangeText={(v) => setCompanionsText(v.replace(/[^0-9]/g, ''))} placeholder="0" value={companionsText} /></View><View style={s.formHalf}><Field autoCapitalize="characters" error={errors.table} label="Mesa" maxLength={30} onChangeText={setTable} placeholder="Ex.: 12 ou A3" value={table} /></View></View><View style={s.preview}><Text style={s.previewLabel}>TAMANHO DO GRUPO</Text><Text style={s.previewNumber}>{Number.isInteger(companions) ? companions + 1 : '—'}</Text><Text style={s.previewText}>convidado principal + acompanhantes</Text></View><Button label={saving ? 'Salvando…' : guest ? 'Salvar alterações' : 'Cadastrar convidado'} onPress={() => void submit()} disabled={saving} /></ScrollView></KeyboardAvoidingView></SafeAreaView></Modal>;
+  const submit = async () => { const draft = { name, role, companions, table }; const nextErrors = validateGuestDraft(draft); setErrors(nextErrors); if (Object.keys(nextErrors).length) return; setSaving(true); try { await onSave(draft, guest); } catch { Alert.alert('Não foi possível salvar', 'Confira o aparelho e tente novamente.'); setSaving(false); } };
+  return <Modal animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet" visible={visible}><SafeAreaView style={s.modalPage}><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalPage}><View style={s.modalHeader}><Pressable onPress={onClose} style={s.cancel}><Text style={s.cancelText}>Cancelar</Text></Pressable><Text style={s.modalTitle}>{guest ? 'Editar convidado' : 'Novo convidado'}</Text><View style={s.headerSpacer} /></View><ScrollView contentContainerStyle={s.form} keyboardShouldPersistTaps="handled"><Field autoCapitalize="words" autoFocus error={errors.name} label="Nome do convidado" onChangeText={setName} placeholder="Ex.: Maria Aparecida Silva" value={name} />{!!duplicates.length && <View style={s.warning}><Text style={s.warningTitle}>Já existe alguém com este nome</Text><Text style={s.warningText}>{duplicates.map((item) => `${item.name} — mesa ${item.table}`).join('\n')}</Text></View>}<Field autoCapitalize="words" error={errors.role} label="Função do convidado" maxLength={60} onChangeText={setRole} placeholder="Ex.: Homenageado, Cerimonial ou Convidado" value={role} /><View style={s.formRow}><View style={s.formHalf}><Field error={errors.companions} keyboardType="number-pad" label="Acompanhantes" maxLength={2} onChangeText={(v) => setCompanionsText(v.replace(/[^0-9]/g, ''))} placeholder="0" value={companionsText} /></View><View style={s.formHalf}><Field autoCapitalize="characters" error={errors.table} label="Mesa" maxLength={30} onChangeText={setTable} placeholder="Ex.: 12 ou A3" value={table} /></View></View><View style={s.preview}><Text style={s.previewLabel}>TAMANHO DO GRUPO</Text><Text style={s.previewNumber}>{Number.isInteger(companions) ? companions + 1 : '—'}</Text><Text style={s.previewText}>convidado principal + acompanhantes</Text></View><Button label={saving ? 'Salvando…' : guest ? 'Salvar alterações' : 'Cadastrar convidado'} onPress={() => void submit()} disabled={saving} /></ScrollView></KeyboardAvoidingView></SafeAreaView></Modal>;
 }
 
 function Field({ label, error, ...props }: React.ComponentProps<typeof TextInput> & { label: string; error?: string }) { return <View style={s.field}><Text style={s.fieldLabel}>{label}</Text><TextInput {...props} placeholderTextColor="#92998F" style={[s.fieldInput, !!error && s.fieldInputError, props.style]} />{!!error && <Text style={s.fieldError}>{error}</Text>}</View>; }
 function Button({ label, onPress, compact, disabled }: { label: string; onPress: () => void; compact?: boolean; disabled?: boolean }) { return <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={({ pressed }) => [s.button, compact && s.buttonCompact, disabled && s.buttonDisabled, pressed && !disabled && s.buttonPressed]}><Text style={s.buttonText}>{label}</Text></Pressable>; }
 function Empty({ title, text, action, onPress }: { title: string; text: string; action: string; onPress: () => void }) { return <View style={s.empty}><Text style={s.emptySymbol}>＋</Text><Text style={s.emptyTitle}>{title}</Text><Text style={s.emptyText}>{text}</Text><Button label={action} onPress={onPress} /></View>; }
-function Navigation({ screen, onChange }: { screen: Screen; onChange: (v: Screen) => void }) { return <View style={s.nav}><Nav active={screen === 'search'} icon="⌕" label="Buscar" onPress={() => onChange('search')} /><Nav active={screen === 'guests'} icon="♙" label="Convidados" onPress={() => onChange('guests')} /></View>; }
+function Navigation({ screen, onChange }: { screen: Screen; onChange: (v: Screen) => void }) { return <View style={s.nav}><Nav active={screen === 'search'} icon="⌕" label="Buscar" onPress={() => onChange('search')} /><Nav active={screen === 'guests'} icon="♙" label="Convidados" onPress={() => onChange('guests')} /><Nav active={screen === 'map'} icon="◇" label="Mapa" onPress={() => onChange('map')} /></View>; }
 function Nav({ active, icon, label, onPress }: { active: boolean; icon: string; label: string; onPress: () => void }) { return <Pressable accessibilityRole="tab" accessibilityState={{ selected: active }} onPress={onPress} style={s.navItem}><Text style={[s.navIcon, active && s.navActive]}>{icon}</Text><Text style={[s.navLabel, active && s.navActive]}>{label}</Text></Pressable>; }
 
 const s = StyleSheet.create({
@@ -203,11 +248,11 @@ const s = StyleSheet.create({
   screen: { flex: 1 }, content: { flexGrow: 1, paddingHorizontal: 22, paddingBottom: 32, paddingTop: 28 }, guestContent: { flexGrow: 1, paddingHorizontal: 22, paddingBottom: 32, paddingTop: 25 }, title: { color: C.ink, fontSize: 27, fontWeight: '700' }, subtitle: { color: C.muted, fontSize: 15, lineHeight: 21, marginTop: 5 },
   searchRow: { flexDirection: 'row', gap: 10, marginTop: 22 }, searchBox: { flex: 1, minHeight: 52, backgroundColor: C.card, borderColor: C.line, borderRadius: 13, borderWidth: 1, flexDirection: 'row', alignItems: 'center' }, searchGlyph: { color: C.green, fontSize: 25, marginLeft: 14 }, searchInput: { flex: 1, color: C.ink, fontSize: 16, paddingHorizontal: 10, paddingVertical: 13 }, clear: { height: 40, width: 40, alignItems: 'center', justifyContent: 'center' }, clearText: { color: C.muted, fontSize: 25 },
   button: { minHeight: 52, backgroundColor: C.green, borderRadius: 13, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 22, paddingVertical: 13 }, buttonCompact: { minHeight: 48, paddingHorizontal: 18 }, buttonDisabled: { opacity: 0.45 }, buttonPressed: { backgroundColor: C.greenDark, transform: [{ scale: 0.985 }] }, buttonText: { color: '#FFF', fontSize: 15, fontWeight: '700' }, resultCount: { color: C.muted, fontSize: 12, fontWeight: '600', marginBottom: 10, marginTop: 24, textTransform: 'uppercase' },
-  resultCard: { backgroundColor: C.card, borderColor: C.line, borderRadius: 18, borderWidth: 1, marginBottom: 13, overflow: 'hidden' }, resultTop: { flexDirection: 'row', padding: 18 }, nameBlock: { flex: 1, paddingRight: 10 }, resultName: { color: C.ink, fontSize: 19, fontWeight: '700' }, groupSummary: { color: C.muted, fontSize: 13, lineHeight: 19, marginTop: 5 }, smallAction: { borderRadius: 9, backgroundColor: C.greenSoft, paddingHorizontal: 11, paddingVertical: 8 }, smallActionText: { color: C.green, fontSize: 12, fontWeight: '700' },
+  resultCard: { backgroundColor: C.card, borderColor: C.line, borderRadius: 18, borderWidth: 1, marginBottom: 13, overflow: 'hidden' }, resultTop: { flexDirection: 'row', padding: 18 }, nameBlock: { flex: 1, paddingRight: 10 }, resultName: { color: C.ink, fontSize: 19, fontWeight: '700' }, roleText: { color: C.gold, fontSize: 12, fontWeight: '700', marginTop: 4 }, groupSummary: { color: C.muted, fontSize: 13, lineHeight: 19, marginTop: 5 }, nameHint: { color: C.green, fontSize: 11, fontWeight: '700', marginTop: 8 }, smallAction: { alignSelf: 'flex-start', borderRadius: 9, backgroundColor: C.greenSoft, paddingHorizontal: 11, paddingVertical: 8 }, smallActionText: { color: C.green, fontSize: 12, fontWeight: '700' },
   tablePanel: { backgroundColor: C.green, flexDirection: 'row', minHeight: 92, padding: 17, alignItems: 'center' }, tableLabel: { color: '#BFD5CA', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 }, tableNumber: { color: '#FFF', fontSize: 29, fontWeight: '800' }, mapPlaceholder: { flex: 1, marginLeft: 24, borderLeftColor: '#4D7464', borderLeftWidth: 1, paddingLeft: 18 }, mapTitle: { color: '#FFF', fontSize: 13, fontWeight: '600' }, mapText: { color: '#BFD5CA', fontSize: 11, marginTop: 3 },
   welcome: { backgroundColor: C.greenSoft, borderRadius: 18, marginTop: 32, padding: 24, minHeight: 180, justifyContent: 'center' }, welcomeKicker: { color: C.gold, fontSize: 10, fontWeight: '800', letterSpacing: 1.8 }, welcomeTitle: { color: C.greenDark, fontSize: 23, fontWeight: '700', marginTop: 9 }, welcomeText: { color: '#4F6258', fontSize: 14, lineHeight: 21, marginTop: 9 },
   empty: { alignItems: 'center', backgroundColor: C.card, borderColor: C.line, borderRadius: 18, borderWidth: 1, marginTop: 26, padding: 30 }, emptySymbol: { color: C.gold, fontSize: 38 }, emptyTitle: { color: C.ink, fontSize: 19, fontWeight: '700', marginTop: 8, textAlign: 'center' }, emptyText: { color: C.muted, fontSize: 14, marginBottom: 20, marginTop: 6, textAlign: 'center' },
-  listHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }, listHeadingText: { flex: 1 }, listCard: { alignItems: 'center', backgroundColor: C.card, borderColor: C.line, borderRadius: 14, borderWidth: 1, flexDirection: 'row', marginBottom: 10, padding: 12 }, avatar: { alignItems: 'center', backgroundColor: C.greenSoft, borderRadius: 20, height: 40, justifyContent: 'center', width: 40 }, avatarText: { color: C.green, fontSize: 16, fontWeight: '800' }, listBody: { flex: 1, marginLeft: 12 }, listName: { color: C.ink, fontSize: 15, fontWeight: '700' }, listMeta: { color: C.muted, fontSize: 12, marginTop: 4 }, iconButton: { alignItems: 'center', backgroundColor: C.greenSoft, borderRadius: 9, height: 38, justifyContent: 'center', marginLeft: 7, width: 38 }, iconText: { color: C.green, fontSize: 19 }, deleteButton: { backgroundColor: C.dangerSoft }, deleteText: { color: C.danger, fontSize: 24 },
+  listHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }, listHeadingText: { flex: 1 }, listCard: { alignItems: 'center', backgroundColor: C.card, borderColor: C.line, borderRadius: 14, borderWidth: 1, flexDirection: 'row', marginBottom: 10, padding: 12 }, avatar: { alignItems: 'center', backgroundColor: C.greenSoft, borderRadius: 20, height: 40, justifyContent: 'center', width: 40 }, avatarText: { color: C.green, fontSize: 16, fontWeight: '800' }, listBody: { flex: 1, marginLeft: 12 }, listName: { color: C.ink, fontSize: 15, fontWeight: '700' }, listRole: { color: C.gold, fontSize: 11, fontWeight: '700', marginTop: 3 }, listMeta: { color: C.muted, fontSize: 12, marginTop: 4 }, iconButton: { alignItems: 'center', backgroundColor: C.greenSoft, borderRadius: 9, height: 38, justifyContent: 'center', marginLeft: 7, width: 38 }, iconText: { color: C.green, fontSize: 19 }, deleteButton: { backgroundColor: C.dangerSoft }, deleteText: { color: C.danger, fontSize: 24 },
   nav: { backgroundColor: C.card, borderTopColor: C.line, borderTopWidth: 1, flexDirection: 'row', minHeight: 69 }, navItem: { alignItems: 'center', flex: 1, justifyContent: 'center' }, navIcon: { color: '#889087', fontSize: 23 }, navLabel: { color: '#7B857D', fontSize: 11, fontWeight: '600', marginTop: 3 }, navActive: { color: C.green, fontWeight: '800' },
   modalPage: { flex: 1, backgroundColor: C.paper }, modalHeader: { alignItems: 'center', borderBottomColor: C.line, borderBottomWidth: 1, flexDirection: 'row', minHeight: 62, paddingHorizontal: 18 }, cancel: { paddingVertical: 10, width: 80 }, cancelText: { color: C.green, fontSize: 14, fontWeight: '600' }, modalTitle: { color: C.ink, flex: 1, fontSize: 17, fontWeight: '700', textAlign: 'center' }, headerSpacer: { width: 80 }, form: { alignSelf: 'center', maxWidth: 680, paddingBottom: 40, paddingHorizontal: 22, paddingTop: 26, width: '100%' },
   field: { marginBottom: 19 }, fieldLabel: { color: C.ink, fontSize: 13, fontWeight: '700', marginBottom: 8 }, fieldInput: { backgroundColor: C.card, borderColor: C.line, borderRadius: 12, borderWidth: 1, color: C.ink, fontSize: 16, minHeight: 52, paddingHorizontal: 14 }, fieldInputError: { borderColor: C.danger }, fieldError: { color: C.danger, fontSize: 12, marginTop: 6 }, formRow: { flexDirection: 'row', gap: 12 }, formHalf: { flex: 1 }, warning: { backgroundColor: C.goldSoft, borderRadius: 12, marginBottom: 20, padding: 14 }, warningTitle: { color: '#745322', fontSize: 13, fontWeight: '700' }, warningText: { color: '#806237', fontSize: 12, lineHeight: 18, marginTop: 4 }, preview: { alignItems: 'center', backgroundColor: C.greenSoft, borderRadius: 15, marginBottom: 22, padding: 18 }, previewLabel: { color: C.green, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 }, previewNumber: { color: C.greenDark, fontSize: 34, fontWeight: '800' }, previewText: { color: C.muted, fontSize: 12 },

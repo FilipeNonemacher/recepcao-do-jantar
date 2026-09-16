@@ -19,7 +19,7 @@ O aplicativo usa Supabase para banco central, login e atualizações em tempo re
 3. Abra o arquivo `supabase/schema.sql` deste pacote.
 4. Copie todo o conteúdo, cole no editor e clique em **Run**.
 
-O script cria a tabela `guests`, valida nome, acompanhantes e mesa, ativa a proteção por linha, bloqueia visitantes não autenticados e habilita as atualizações em tempo real.
+O script cria ou atualiza as tabelas `guests` e `event_layouts`, valida nome, função, acompanhantes e mesa, ativa a proteção por linha, bloqueia visitantes não autenticados e habilita as atualizações em tempo real. Se o banco já existir, execute novamente o arquivo completo para adicionar o campo `guest_role` e a planta editável; os convidados antigos receberão a função **Convidado**.
 
 ## 3. Criar o acesso da recepção
 
@@ -53,7 +53,9 @@ Se o projeto Supabase for trocado no futuro, defina `EXPO_PUBLIC_SUPABASE_URL` e
 3. Cadastre um convidado no primeiro.
 4. O convidado deve aparecer no segundo automaticamente.
 5. Edite a mesa no segundo e confirme a mudança no primeiro.
-6. Desligue a internet de um deles e confirme que a última lista continua disponível para consulta. Alterações ficam bloqueadas enquanto o banco não puder ser alcançado.
+6. Abra a aba **Mapa**, mova uma mesa, salve e confirme a mudança no segundo aparelho.
+7. Pesquise um convidado e toque no nome para conferir o destaque da mesa na planta.
+8. Desligue a internet de um deles e confirme que a última lista e o último mapa continuam disponíveis para consulta. Alterações ficam bloqueadas enquanto o banco não puder ser alcançado.
 
 ## Segurança
 

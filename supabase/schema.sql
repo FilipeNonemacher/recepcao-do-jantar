@@ -3,16 +3,38 @@ begin;
 create table if not exists public.guests (
   id text primary key,
   name text not null check (char_length(trim(name)) between 1 and 100),
+  guest_role text not null default 'Convidado' check (char_length(trim(guest_role)) between 1 and 60),
   companions smallint not null default 0 check (companions between 0 and 99),
   table_name text not null check (char_length(trim(table_name)) between 1 and 30),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.event_layouts (
+  id text primary key,
+  elements jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.guests
+  add column if not exists guest_role text not null default 'Convidado';
+
+do $$
+begin
+  alter table public.guests
+    add constraint guests_guest_role_length
+    check (char_length(trim(guest_role)) between 1 and 60);
+exception
+  when duplicate_object then null;
+end $$;
+
 alter table public.guests enable row level security;
+alter table public.event_layouts enable row level security;
 
 revoke all on table public.guests from anon;
 grant select, insert, update, delete on table public.guests to authenticated;
+revoke all on table public.event_layouts from anon;
+grant select, insert, update, delete on table public.event_layouts to authenticated;
 
 drop policy if exists "Equipe pode consultar convidados" on public.guests;
 create policy "Equipe pode consultar convidados"
@@ -30,9 +52,32 @@ drop policy if exists "Equipe pode excluir convidados" on public.guests;
 create policy "Equipe pode excluir convidados"
   on public.guests for delete to authenticated using (true);
 
+drop policy if exists "Equipe pode consultar o mapa" on public.event_layouts;
+create policy "Equipe pode consultar o mapa"
+  on public.event_layouts for select to authenticated using (true);
+
+drop policy if exists "Equipe pode criar o mapa" on public.event_layouts;
+create policy "Equipe pode criar o mapa"
+  on public.event_layouts for insert to authenticated with check (true);
+
+drop policy if exists "Equipe pode editar o mapa" on public.event_layouts;
+create policy "Equipe pode editar o mapa"
+  on public.event_layouts for update to authenticated using (true) with check (true);
+
+drop policy if exists "Equipe pode excluir o mapa" on public.event_layouts;
+create policy "Equipe pode excluir o mapa"
+  on public.event_layouts for delete to authenticated using (true);
+
 do $$
 begin
   alter publication supabase_realtime add table public.guests;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.event_layouts;
 exception
   when duplicate_object then null;
 end $$;

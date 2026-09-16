@@ -10,7 +10,7 @@
     "expo": "~57.0.23",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
-    "react-dom": "^19.2.3",
+    "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-web": "^0.21.2"
   },
@@ -25,6 +25,6 @@
     "web": "expo start --web",
     "build:web": "expo export --platform web",
     "check": "tsc --noEmit",
-    "test": "node --test src/domain/guest.test.cjs"
+    "test": "node --test src/domain/*.test.cjs"
   }
 }

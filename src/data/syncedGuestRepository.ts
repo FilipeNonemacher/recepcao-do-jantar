@@ -4,6 +4,7 @@ import { supabase } from './supabase';
 type GuestRow = {
   id: string;
   name: string;
+  guest_role?: string;
   companions: number;
   table_name: string;
   created_at: string;
@@ -19,6 +20,7 @@ function fromRow(row: GuestRow): Guest {
   return {
     id: row.id,
     name: row.name,
+    role: row.guest_role?.trim() || 'Convidado',
     companions: row.companions,
     table: row.table_name,
     createdAt: row.created_at,
@@ -30,6 +32,7 @@ function toRow(guest: Guest): GuestRow {
   return {
     id: guest.id,
     name: guest.name,
+    guest_role: guest.role,
     companions: guest.companions,
     table_name: guest.table,
     created_at: guest.createdAt,

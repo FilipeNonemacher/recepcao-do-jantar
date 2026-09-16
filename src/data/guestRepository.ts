@@ -3,10 +3,12 @@ import { Guest } from '../domain/guest';
 
 const STORAGE_KEY = '@recepcao-jantar/guests/v1';
 
-function isGuest(value: unknown): value is Guest {
-  if (!value || typeof value !== 'object') return false;
+function parseGuest(value: unknown): Guest | null {
+  if (!value || typeof value !== 'object') return null;
   const guest = value as Partial<Guest>;
-  return typeof guest.id === 'string' && typeof guest.name === 'string' && Number.isInteger(guest.companions) && (guest.companions ?? -1) >= 0 && typeof guest.table === 'string' && typeof guest.createdAt === 'string' && typeof guest.updatedAt === 'string';
+  const isValid = typeof guest.id === 'string' && typeof guest.name === 'string' && Number.isInteger(guest.companions) && (guest.companions ?? -1) >= 0 && typeof guest.table === 'string' && typeof guest.createdAt === 'string' && typeof guest.updatedAt === 'string';
+  if (!isValid) return null;
+  return { ...guest, role: typeof guest.role === 'string' && guest.role.trim() ? guest.role : 'Convidado' } as Guest;
 }
 
 export interface GuestRepository {
@@ -19,8 +21,10 @@ export const localGuestRepository: GuestRepository = {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed) || !parsed.every(isGuest)) throw new Error('A lista salva neste aparelho está em um formato inválido.');
-    return parsed;
+    if (!Array.isArray(parsed)) throw new Error('A lista salva neste aparelho está em um formato inválido.');
+    const guests = parsed.map(parseGuest);
+    if (guests.some((guest) => !guest)) throw new Error('A lista salva neste aparelho está em um formato inválido.');
+    return guests as Guest[];
   },
   async save(guests) {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(guests));

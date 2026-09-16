@@ -1,13 +1,14 @@
 export type Guest = {
   id: string;
   name: string;
+  role: string;
   companions: number;
   table: string;
   createdAt: string;
   updatedAt: string;
 };
 
-export type GuestDraft = Pick<Guest, 'name' | 'companions' | 'table'>;
+export type GuestDraft = Pick<Guest, 'name' | 'role' | 'companions' | 'table'>;
 export type GuestValidationErrors = Partial<Record<keyof GuestDraft, string>>;
 
 export function normalizeText(value: string): string {
@@ -15,13 +16,20 @@ export function normalizeText(value: string): string {
 }
 
 export function cleanGuestDraft(draft: GuestDraft): GuestDraft {
-  return { name: draft.name.trim().replace(/\s+/g, ' '), companions: draft.companions, table: draft.table.trim().replace(/\s+/g, ' ') };
+  return {
+    name: draft.name.trim().replace(/\s+/g, ' '),
+    role: draft.role.trim().replace(/\s+/g, ' '),
+    companions: draft.companions,
+    table: draft.table.trim().replace(/\s+/g, ' '),
+  };
 }
 
 export function validateGuestDraft(draft: GuestDraft): GuestValidationErrors {
   const errors: GuestValidationErrors = {};
   if (!draft.name.trim()) errors.name = 'Informe o nome do convidado.';
   if (draft.name.trim().length > 100) errors.name = 'Use no máximo 100 caracteres.';
+  if (!draft.role.trim()) errors.role = 'Informe a função do convidado.';
+  if (draft.role.trim().length > 60) errors.role = 'Use no máximo 60 caracteres.';
   if (!Number.isInteger(draft.companions) || draft.companions < 0) errors.companions = 'Informe zero ou um número inteiro maior.';
   if (draft.companions > 99) errors.companions = 'Use no máximo 99 acompanhantes.';
   if (!draft.table.trim()) errors.table = 'Informe a mesa do convidado.';
@@ -31,7 +39,9 @@ export function validateGuestDraft(draft: GuestDraft): GuestValidationErrors {
 
 export function searchGuests(guests: Guest[], query: string): Guest[] {
   const normalizedQuery = normalizeText(query);
-  const result = normalizedQuery ? guests.filter((guest) => normalizeText(guest.name).includes(normalizedQuery)) : guests;
+  const result = normalizedQuery
+    ? guests.filter((guest) => normalizeText(guest.name).includes(normalizedQuery) || normalizeText(guest.role).includes(normalizedQuery))
+    : guests;
   return [...result].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 

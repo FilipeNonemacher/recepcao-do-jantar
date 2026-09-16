@@ -1,5 +1,6 @@
 # Dependências e arquivos gerados
 node_modules/
+.pnpm-store/
 .expo/
 dist/
 web-build/
