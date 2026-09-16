@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated, Modal, PanResponder, Pressable, SafeAreaView, ScrollView, StyleSheet,
   Text, TextInput, View,
 } from 'react-native';
-import { clampMapElement, createMapElement, EventLayout, findTableElement, MapElement } from '../domain/eventLayout';
+import { clampMapElement, createDefaultLayout, createMapElement, EventLayout, findTableElement, MapElement } from '../domain/eventLayout';
 import { Guest, groupSize, normalizeText } from '../domain/guest';
 
 const COLORS = ['#FFFFFF', '#F51D2A', '#FFE400', '#245744', '#4D76B8', '#D8DEE3', '#F4F1E8'];
@@ -49,7 +49,7 @@ export function EventMap({ layout, editable = false, selectedId, highlightedTabl
   );
 }
 
-function MapItem({ element, editable, highlighted, selected, mapSize, onMove, onSelect, onDragStateChange, occupiedSeats }: {
+const MapItem = memo(function MapItem({ element, editable, highlighted, selected, mapSize, onMove, onSelect, onDragStateChange, occupiedSeats }: {
   element: MapElement;
   editable: boolean;
   highlighted: boolean;
@@ -129,15 +129,21 @@ function MapItem({ element, editable, highlighted, selected, mapSize, onMove, on
       {isTable && occupiedSeats !== undefined && <Text style={[styles.occupancyText, { color: textColor }]}>{occupiedSeats}/{element.capacity || 8}</Text>}
     </View>
   );
-}
+}, (previous, next) => previous.element === next.element
+  && previous.editable === next.editable
+  && previous.highlighted === next.highlighted
+  && previous.selected === next.selected
+  && previous.occupiedSeats === next.occupiedSeats
+  && previous.mapSize.width === next.mapSize.width
+  && previous.mapSize.height === next.mapSize.height);
 
-function ChairRing({ capacity, occupied }: { capacity: number; occupied: number }) {
-  const seats = Array.from({ length: capacity }, (_, index) => {
+const ChairRing = memo(function ChairRing({ capacity, occupied }: { capacity: number; occupied: number }) {
+  const seats = useMemo(() => Array.from({ length: capacity }, (_, index) => {
     const angle = (Math.PI * 2 * index) / capacity - Math.PI / 2;
     return { left: `${50 + Math.cos(angle) * 67}%` as `${number}%`, top: `${50 + Math.sin(angle) * 67}%` as `${number}%` };
-  });
+  }), [capacity]);
   return <View pointerEvents="none" style={styles.chairRing}>{seats.map((position, index) => <View key={index} style={[styles.chair, position, index < occupied && styles.chairOccupied]} />)}</View>;
-}
+});
 
 function darkTextFor(color: string): boolean {
   const value = color.replace('#', '');
@@ -154,6 +160,7 @@ export function LayoutEditorScreen({ layout, onSave }: { layout: EventLayout; on
   const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
   const [message, setMessage] = useState('Arraste os itens para mudar suas posições.');
   useEffect(() => { setDraft(layout); if (layout.locked) setSelectedId(undefined); }, [layout.updatedAt]);
   const selected = draft.elements.find((element) => element.id === selectedId);
@@ -194,10 +201,26 @@ export function LayoutEditorScreen({ layout, onSave }: { layout: EventLayout; on
       setMessage('Não foi possível alterar o bloqueio. Confira a conexão e tente novamente.');
     } finally { setSaving(false); }
   };
+  const resetLayout = async () => {
+    if (draft.locked || saving) return;
+    setSaving(true);
+    const next = createDefaultLayout();
+    try {
+      await onSave(next);
+      setDraft(next);
+      setSelectedId(undefined);
+      setSettingsOpen(false);
+      setResetOpen(false);
+      setMessage('Mapa restaurado para o modelo inicial e sincronizado.');
+    } catch {
+      setResetOpen(false);
+      setMessage('Não foi possível redefinir o mapa. Confira a conexão e tente novamente.');
+    } finally { setSaving(false); }
+  };
   return (
-    <ScrollView contentContainerStyle={styles.editorContent} scrollEnabled={!dragging}>
+    <><ScrollView contentContainerStyle={styles.editorContent} scrollEnabled={!dragging}>
       <View style={styles.headingRow}><View style={styles.headingBlock}><Text style={styles.heading}>Mapa do jantar</Text><Text style={styles.subheading}>{draft.locked ? 'Mapa oficial do evento, protegido contra alterações.' : 'Edite a planta e arraste cada item até a posição desejada.'}</Text></View><Pressable accessibilityLabel="Opções do mapa" onPress={() => setSettingsOpen((open) => !open)} style={styles.moreButton}><Text style={styles.moreText}>•••</Text></Pressable></View>
-      {settingsOpen && <View style={styles.settingsPanel}><Text style={styles.settingsTitle}>Controle do mapa</Text><Text style={styles.settingsText}>{draft.locked ? 'Para fazer alterações, desbloqueie a edição. O mapa ficará editável para todos os aparelhos conectados.' : 'Ao selar, esta configuração será salva como o mapa oficial e ninguém poderá mover, adicionar ou excluir itens até o desbloqueio.'}</Text><Action label={saving ? 'Aguarde…' : draft.locked ? 'Desbloquear edição' : 'Selar e definir mapa'} onPress={() => void changeLock(!draft.locked)} disabled={saving} /></View>}
+      {settingsOpen && <View style={styles.settingsPanel}><Text style={styles.settingsTitle}>Controle do mapa</Text><Text style={styles.settingsText}>{draft.locked ? 'Para fazer alterações, desbloqueie a edição. O mapa ficará editável para todos os aparelhos conectados.' : 'Ao selar, esta configuração será salva como o mapa oficial e ninguém poderá mover, adicionar ou excluir itens até o desbloqueio.'}</Text><Action label={saving ? 'Aguarde…' : draft.locked ? 'Desbloquear edição' : 'Selar e definir mapa'} onPress={() => void changeLock(!draft.locked)} disabled={saving} /><Pressable accessibilityRole="button" disabled={draft.locked || saving} onPress={() => setResetOpen(true)} style={[styles.resetButton, (draft.locked || saving) && styles.disabled]}><Text style={styles.resetButtonText}>Redefinir para o mapa inicial</Text></Pressable>{draft.locked && <Text style={styles.resetHint}>Desbloqueie a edição para redefinir o mapa.</Text>}</View>}
       <View style={[styles.lockBanner, draft.locked ? styles.lockBannerOn : styles.lockBannerOff]}><Text style={[styles.lockText, draft.locked && styles.lockTextOn]}>{draft.locked ? '🔒 MAPA SELADO' : 'EDIÇÃO LIBERADA'}</Text></View>
       {!draft.locked && <View style={styles.toolbar}>
         <Action label="+ Mesa" onPress={() => add('table')} />
@@ -222,21 +245,25 @@ export function LayoutEditorScreen({ layout, onSave }: { layout: EventLayout; on
         </View>
         <Pressable onPress={remove} style={styles.remove}><Text style={styles.removeText}>Excluir este item</Text></Pressable>
       </View>}
-    </ScrollView>
+    </ScrollView><Modal animationType="fade" onRequestClose={() => setResetOpen(false)} transparent visible={resetOpen}><View style={styles.confirmBackdrop}><View style={styles.confirmCard}><Text style={styles.confirmTitle}>Redefinir o mapa?</Text><Text style={styles.confirmText}>Todas as mesas, cores, posições e estruturas atuais serão substituídas pelo modelo inicial. Os convidados não serão apagados.</Text><View style={styles.confirmActions}><Pressable disabled={saving} onPress={() => setResetOpen(false)} style={[styles.confirmButton, styles.confirmCancel]}><Text style={styles.confirmCancelText}>Cancelar</Text></Pressable><Pressable disabled={saving} onPress={() => void resetLayout()} style={[styles.confirmButton, styles.confirmReset, saving && styles.disabled]}><Text style={styles.confirmResetText}>{saving ? 'Redefinindo…' : 'Redefinir'}</Text></Pressable></View></View></View></Modal></>
   );
 }
 
 export function OccupancyScreen({ layout, guests }: { layout: EventLayout; guests: Guest[] }) {
-  const occupancy = guests.reduce<Record<string, number>>((totals, guest) => {
+  const occupancy = useMemo(() => guests.reduce<Record<string, number>>((totals, guest) => {
     if (!guest.checkedIn) return totals;
     const key = normalizeText(guest.table);
     totals[key] = (totals[key] || 0) + groupSize(guest);
     return totals;
-  }, {});
-  const tables = layout.elements.filter((element) => element.kind === 'table');
-  const capacity = tables.reduce((sum, table) => sum + (table.capacity || 8), 0);
-  const present = Object.values(occupancy).reduce((sum, value) => sum + value, 0);
-  const overCapacity = tables.filter((table) => (occupancy[normalizeText(table.label)] || 0) > (table.capacity || 8));
+  }, {}), [guests]);
+  const { capacity, present, overCapacity } = useMemo(() => {
+    const tables = layout.elements.filter((element) => element.kind === 'table');
+    return {
+      capacity: tables.reduce((sum, table) => sum + (table.capacity || 8), 0),
+      present: Object.values(occupancy).reduce((sum, value) => sum + value, 0),
+      overCapacity: tables.filter((table) => (occupancy[normalizeText(table.label)] || 0) > (table.capacity || 8)),
+    };
+  }, [layout.elements, occupancy]);
   return <ScrollView contentContainerStyle={styles.occupancyContent}>
     <Text style={styles.heading}>Ocupação das mesas</Text>
     <Text style={styles.subheading}>Vermelho indica lugar ocupado; branco indica lugar disponível.</Text>
@@ -264,14 +291,16 @@ export function MapViewerModal({ guest, layout, onClose }: { guest?: Guest; layo
 }
 
 const styles = StyleSheet.create({
-  map: { aspectRatio: 0.72, alignSelf: 'center', backgroundColor: '#FCFBF7', borderColor: '#D9DDD8', borderRadius: 16, borderWidth: 1, maxWidth: 700, overflow: 'hidden', position: 'relative', width: '100%' },
+  map: { aspectRatio: 0.72, alignSelf: 'center', backgroundColor: '#FCFBF7', borderColor: '#D9DDD8', borderRadius: 16, borderWidth: 1, maxWidth: 700, overflow: 'hidden', position: 'relative', userSelect: 'none', width: '100%' },
   mapTitle: { alignItems: 'center', left: '18%', position: 'absolute', right: '18%', top: '1.5%' }, mapTitleText: { color: INK, fontSize: 12, fontWeight: '900', letterSpacing: 1.4 },
-  item: { alignItems: 'center', justifyContent: 'center', position: 'absolute' }, table: { borderColor: INK, borderRadius: 999, borderWidth: 2 }, structure: { borderColor: INK, borderRadius: 3, borderWidth: 1.5, padding: 2 }, editable: { elevation: 2 }, selected: { borderColor: GOLD, borderWidth: 3 },
+  item: { alignItems: 'center', justifyContent: 'center', position: 'absolute', userSelect: 'none' }, table: { borderColor: INK, borderRadius: 999, borderWidth: 2 }, structure: { borderColor: INK, borderRadius: 3, borderWidth: 1.5, padding: 2 }, editable: { elevation: 2 }, selected: { borderColor: GOLD, borderWidth: 3 },
   tableText: { fontSize: 15, fontWeight: '900', paddingHorizontal: 2, textAlign: 'center', width: '100%' }, structureText: { fontSize: 9, fontWeight: '900', textAlign: 'center', width: '100%' },
   occupancyText: { fontSize: 7, fontWeight: '800', marginTop: -2 }, chairRing: { bottom: 0, left: 0, overflow: 'visible', position: 'absolute', right: 0, top: 0 }, chair: { backgroundColor: '#FFFFFF', borderColor: '#A33D3D', borderRadius: 5, borderWidth: 1, height: 8, marginLeft: -4, marginTop: -4, position: 'absolute', width: 8 }, chairOccupied: { backgroundColor: '#E42D35' },
   highlight: { borderColor: '#00A8FF', borderRadius: 999, borderWidth: 4, bottom: -6, left: -6, position: 'absolute', right: -6, top: -6 },
   editorContent: { alignSelf: 'center', maxWidth: 760, paddingBottom: 34, paddingHorizontal: 18, paddingTop: 22, width: '100%' }, heading: { color: INK, fontSize: 27, fontWeight: '700' }, subheading: { color: '#647067', fontSize: 14, lineHeight: 20, marginTop: 5 }, toolbar: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 17 }, helper: { color: '#647067', fontSize: 12, marginBottom: 12, marginTop: 10 },
   headingRow: { alignItems: 'flex-start', flexDirection: 'row' }, headingBlock: { flex: 1 }, moreButton: { alignItems: 'center', borderColor: '#DEE4DF', borderRadius: 10, borderWidth: 1, height: 40, justifyContent: 'center', marginLeft: 12, width: 44 }, moreText: { color: INK, fontSize: 17, fontWeight: '900', letterSpacing: 2, marginTop: -7 }, settingsPanel: { backgroundColor: '#FFFFFF', borderColor: '#DEE4DF', borderRadius: 13, borderWidth: 1, marginTop: 12, padding: 16 }, settingsTitle: { color: INK, fontSize: 15, fontWeight: '800' }, settingsText: { color: '#647067', fontSize: 12, lineHeight: 18, marginBottom: 13, marginTop: 6 }, lockBanner: { alignItems: 'center', borderRadius: 9, marginTop: 14, padding: 9 }, lockBannerOn: { backgroundColor: '#F7EEDC' }, lockBannerOff: { backgroundColor: '#E5EFE9' }, lockText: { color: GREEN, fontSize: 10, fontWeight: '900', letterSpacing: 1.2 }, lockTextOn: { color: '#745322' },
+  resetButton: { alignItems: 'center', backgroundColor: '#FCEAEA', borderColor: '#F3CACA', borderRadius: 10, borderWidth: 1, justifyContent: 'center', marginTop: 10, minHeight: 43, paddingHorizontal: 15 }, resetButtonText: { color: '#A33D3D', fontSize: 13, fontWeight: '700' }, resetHint: { color: '#7A817B', fontSize: 11, marginTop: 6, textAlign: 'center' },
+  confirmBackdrop: { alignItems: 'center', backgroundColor: 'rgba(18, 28, 23, 0.55)', flex: 1, justifyContent: 'center', padding: 22 }, confirmCard: { alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 18, maxWidth: 420, padding: 24, width: '100%' }, confirmTitle: { color: INK, fontSize: 21, fontWeight: '800', textAlign: 'center' }, confirmText: { color: '#647067', fontSize: 13, lineHeight: 19, marginTop: 10, textAlign: 'center' }, confirmActions: { flexDirection: 'row', gap: 10, marginTop: 20, width: '100%' }, confirmButton: { alignItems: 'center', borderRadius: 11, flex: 1, justifyContent: 'center', minHeight: 48, paddingHorizontal: 12 }, confirmCancel: { backgroundColor: '#E5EFE9' }, confirmReset: { backgroundColor: '#A33D3D' }, confirmCancelText: { color: GREEN, fontSize: 14, fontWeight: '800' }, confirmResetText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
   action: { alignItems: 'center', backgroundColor: GREEN, borderRadius: 10, justifyContent: 'center', minHeight: 43, paddingHorizontal: 15 }, actionSecondary: { backgroundColor: '#E5EFE9', borderColor: '#C9D8D0', borderWidth: 1 }, actionCompact: { minHeight: 38, paddingHorizontal: 10 }, actionText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' }, actionTextSecondary: { color: GREEN }, disabled: { opacity: 0.5 },
   inspector: { backgroundColor: '#FFFFFF', borderColor: '#DEE4DF', borderRadius: 15, borderWidth: 1, marginTop: 16, padding: 18 }, inspectorTitle: { color: INK, fontSize: 18, fontWeight: '700', marginBottom: 14 }, fieldLabel: { color: INK, fontSize: 12, fontWeight: '700', marginBottom: 7, marginTop: 10 }, input: { backgroundColor: '#FAF8F3', borderColor: '#DEE4DF', borderRadius: 10, borderWidth: 1, color: INK, fontSize: 16, minHeight: 47, paddingHorizontal: 12 }, colors: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, color: { borderColor: '#ADB5AF', borderRadius: 19, borderWidth: 1, height: 38, width: 38 }, colorSelected: { borderColor: GOLD, borderWidth: 4 }, sizeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, remove: { alignItems: 'center', backgroundColor: '#FCEAEA', borderRadius: 10, marginTop: 20, padding: 13 }, removeText: { color: '#A33D3D', fontSize: 13, fontWeight: '700' },
   capacityRow: { alignItems: 'center', flexDirection: 'row', gap: 14 }, capacityNumber: { color: INK, fontSize: 20, fontWeight: '800', minWidth: 32, textAlign: 'center' }, occupancyContent: { alignSelf: 'center', maxWidth: 760, paddingBottom: 34, paddingHorizontal: 18, paddingTop: 22, width: '100%' }, occupancyStats: { flexDirection: 'row', gap: 8, marginBottom: 18, marginTop: 15 }, occupancyStat: { alignItems: 'center', backgroundColor: '#FFFFFF', borderColor: '#DEE4DF', borderRadius: 12, borderWidth: 1, flex: 1, padding: 12 }, occupancyValue: { color: GREEN, fontSize: 22, fontWeight: '900' }, occupancyLabel: { color: '#647067', fontSize: 10, marginTop: 2 },

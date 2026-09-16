@@ -55,8 +55,9 @@ export async function saveSyncedGuest(guest: Guest): Promise<void> {
 }
 
 export async function deleteSyncedGuest(id: string): Promise<void> {
-  const { error } = await requireClient().from('guests').delete().eq('id', id);
+  const { data, error } = await requireClient().from('guests').delete().eq('id', id).select('id');
   if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error('O convidado não foi encontrado ou não pôde ser excluído.');
 }
 
 export function subscribeToGuests(onChange: () => void, onStatus: (online: boolean) => void): () => void {
